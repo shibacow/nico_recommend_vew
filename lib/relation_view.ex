@@ -1,84 +1,75 @@
 require Poison
 
-defmodule Tags do
+defmodule VinfoTags do
 	def start_link do
-		Task.start_link(fn -> loop(%{}) end)
+		Task.start_link(fn -> loop(%{},%{}) end)
 	end
-	def loop(map) do
+	def loop(vmap,tagmap) do
 		receive do
-			{:put,tag} ->
-				loop(Map.update(map,tag,1,fn(v) -> v+1 end))
-			{:keys,caller} ->
-				send caller,{:keys,:ok,Map.keys(map)}
-				loop(map)
-			{:to_list,caller} -> 
-				send caller,{:to_list,:ok,Map.to_list(map)}
-				loop(map)
-			{:size,caller}->
-				send caller,{:size,:ok,Map.size(map)}
-				loop(map)
+			{:put,vid,tags} ->
+        vmap = Map.put(vmap,vid,tags)
+			  tagmap = Enum.reduce tags,tagmap,fn a,acc ->
+				  t = a["tag"]
+				  Map.update(acc,t,1,fn(v)-> v+1 end)
+        end
+			  loop(vmap,tagmap)
+			{:normalize}->
+				sz  = Map.size(vmap)
+				map2 = for {k,v} <- tagmap, into: %{},do: {k,1-v*9/sz}
+				loop(vmap,map2)
+			{:to_list,caller} ->
+				send caller,{:to_list,:ok,Map.to_list(tagmap)}
+				loop(vmap,tagmap)
+			{:size,caller} ->
+				send caller,{:size,:ok,Map.size(tagmap)}
+				loop(vmap,tagmap)
 		end
 	end
 end
 
 defmodule ReadFileGenTags do
-	def readfiles(fname,pid) do
+	def readfiles(fname,vpid) do
 		IO.puts("fname=#{fname}")
 		File.open(fname,[:read,:compressed],fn(file)-> 
 			Enum.each(IO.stream(file,:line),fn(line)->
 				json = Poison.Parser.parse!(line)
-				Enum.each(json["tags"],fn(a) ->
-					tag = a["tag"]
-					#IO.puts("tags=#{tag}")
-					send pid,{:put,tag}
-				end)
+				vid = json["video_id"]
+				tags = json["tags"]
+				send vpid,{:put,vid,tags}
 			end)
 		end)
 		fname
 	end
 end
 defmodule GenerateTags do
-	def main do
-		{:ok,pid} = Tags.start_link
-		path = "../videoinfo2"
-		tlist = []
-		#Enum.map(File.ls!(path),fn(x) -> 
-		#	fname = "#{path}/#{x}"
-		#	t = Task.async(fn -> ReadFileGenTags.readfiles(fname,pid) end)
-		#  Task.await(t)
-		#end)
+	defp generateTags(path,vpid,timeout) do
 		File.ls!(path) |>
-			Enum.map(&(Task.async(fn -> ReadFileGenTags.readfiles(path<>"/"<>&1,pid) end))) |>
-			Enum.map(&(Task.await(&1,1000000)))
-		{:ok,tsk}=Task.start_link(fn -> loop() end)
-    send pid,{:to_list,tsk}
-		#{:ok,tsk}=Task.start_link(fn -> loop() end)
-    send pid,{:keys,tsk}
-		send pid,{:size,tsk}
-		pid
+			Enum.map(&(Task.async(fn -> ReadFileGenTags.readfiles(path<>"/"<>&1,vpid) end))) |>
+			Enum.map(&(Task.await(&1,timeout)))
 	end
-	def get_data(pid) do
+	def main do
+		{:ok,vpid} = VinfoTags.start_link
+		path = "../videoinfo3"
+		timeout=100000 #100sec
+		generateTags(path,vpid,timeout)
 		{:ok,tsk}=Task.start_link(fn -> loop() end)
-		send pid,{:size,tsk}
+		send vpid,{:normalize}
+		send vpid,{:to_list,tsk}
+		send vpid,{:size,tsk}
 	end
-	
 	def loop do
 		receive do
 			{:to_list,:ok,results} ->  
 				Enum.each(results,fn(a)->
-					#IO.puts tuple_size a
-					if elem(a,1) > 300 do
-						IO.inspect a
+					{k,v} = a
+					if v < 0.8 do
+						IO.puts("k=#{k} v=#{v}")
 					end
 				end)
 				loop()
-			{:keys,:ok,results} -> 
-				IO.inspect results 
+			{:size,:ok,sz} ->  
+				IO.puts("size=#{sz}")
 				loop()
-			{:size,:ok,results} -> 
-				#IO.inspect results 
-				IO.puts "size = #{results}"
-				#loop()
 		end
 	end
 end
