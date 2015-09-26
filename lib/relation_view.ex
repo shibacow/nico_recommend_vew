@@ -12,10 +12,10 @@ defmodule VinfoTags do
 			{:tagput,t} ->
 			  loop(vmap,Map.update(tagmap,t,1,fn(v)-> v+1 end))
 			{:normalize,caller}->
-			  IO.puts("normalize start")
+			  Logger.info("normalize start")
 				sz  = hd(Enum.sort(Map.to_list(tagmap),fn(a,b) -> elem(a,1) > elem(b,1) end))
 			  sz = elem(sz,1) |> :math.sqrt |> :math.sqrt
-			  IO.puts("sz=#{sz}")
+			  Logger.info("sz=#{sz}")
 				tagmap = for {k,v} <- tagmap, into: %{},do: {k,1-:math.sqrt(:math.sqrt(v))/sz}
 				send caller,{:normalize,:ok,vmap,tagmap}
 				loop(vmap,tagmap)
@@ -31,16 +31,18 @@ end
 
 defmodule ReadFileGenTags do
 	def readfiles(fname,vpid) do
-		IO.puts("fname=#{fname}")
+		Logger.info("fname=#{fname}")
 		File.open(fname,[:read,:compressed],fn(file)-> 
 			Enum.each(IO.stream(file,:line),fn(line)->
 				json = Poison.Parser.parse!(line)
 				vid = json["video_id"]
-				tags = json["tags"]
+				tags = Enum.reduce(json["tags"],[],fn(a,acc)->
+					cpt = :crypto.hash(:md5,a["tag"])
+					acc++[cpt]
+				end)
 				send vpid,{:put,vid,tags}
 				Enum.each(tags,fn(a) ->
-					t = a["tag"]
-					send vpid,{:tagput,t}
+					send vpid,{:tagput,a}
 				end)
 			end)
 		end)
@@ -51,10 +53,10 @@ end
 defmodule SimilaritySearch do
 	def search({a,i},vmap,tagmap) do
 		avid = elem(a,0)
-		atags = for k <- elem(a,1), do: k["tag"]
+		atags = for k <- elem(a,1), do: k
 		rpp = Enum.filter_map(Map.to_list(vmap),fn(x) -> elem(x,0) != avid end,fn(b)->
 			bvid = elem(b,0)
-			btags = for c <- elem(b,1), do: c["tag"]
+			btags = for c <- elem(b,1), do: c
 			s = HashSet.intersection(Enum.into(atags,HashSet.new),Enum.into(btags,HashSet.new)) |> HashSet.to_list 
 			r = Enum.reduce(s,0,fn(t,acc) -> Map.get(tagmap,t,0) + acc end)
 		{avid,bvid,r}
@@ -67,7 +69,7 @@ defmodule SimilaritySearch do
     if rem(i,10) == 0  do
 			Enum.each(cpp,fn(kk)->
 				{a,b,c} = kk
-				IO.puts "i=#{i} a=#{a} b=#{b} c=#{c}"
+				Logger.info "i=#{i} a=#{a} b=#{b} c=#{c}"
 			end)
 		end
 		cpp
@@ -103,8 +105,8 @@ defmodule GenerateTags do
 	end
 	def main(args) do
 		{:ok,vpid} = VinfoTags.start_link
-		path = "../videoinfo2"
-		timeout=100000 #100sec
+		path = "../videoinfo"
+		timeout=1000000 #1000sec
 		generateTags(path,vpid,timeout)
 		{:ok,tsk}=Task.start_link(fn -> loop() end)
 		send vpid,{:normalize,tsk}
@@ -127,7 +129,7 @@ defmodule GenerateTags do
 				loop()
 			{:normalize,:ok,vmap,tagmap} ->
 				Logger.debug("normlaize end")
-				timeout = 100000
+				timeout = 1000000 #1000sec
 				similarityVInfo(vmap,tagmap,timeout)
 				loop()
 		end
