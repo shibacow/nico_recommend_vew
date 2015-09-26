@@ -47,6 +47,32 @@ defmodule ReadFileGenTags do
 		fname
 	end
 end
+
+defmodule SimilaritySearch do
+	def search({a,i},vmap,tagmap) do
+		avid = elem(a,0)
+		atags = for k <- elem(a,1), do: k["tag"]
+		rpp = Enum.filter_map(Map.to_list(vmap),fn(x) -> elem(x,0) != avid end,fn(b)->
+			bvid = elem(b,0)
+			btags = for c <- elem(b,1), do: c["tag"]
+			s = HashSet.intersection(Enum.into(atags,HashSet.new),Enum.into(btags,HashSet.new)) |> HashSet.to_list 
+			r = Enum.reduce(s,0,fn(t,acc) -> Map.get(tagmap,t,0) + acc end)
+		{avid,bvid,r}
+		end)
+		pp = Enum.sort(rpp,fn(a,b)-> 
+			{_,_,aa} = a 
+			{_,_,bb} = b
+			aa > bb end)
+		cpp = Enum.slice(pp,0,10)
+    if rem(i,10) == 0  do
+			Enum.each(cpp,fn(kk)->
+				{a,b,c} = kk
+				IO.puts "i=#{i} a=#{a} b=#{b} c=#{c}"
+			end)
+		end
+		cpp
+	end
+end
 defmodule GenerateTags do
 	use Application
 	defp generateTags(path,vpid,timeout) do
@@ -65,39 +91,25 @@ defmodule GenerateTags do
     opts = [strategy: :one_for_one, name: GenerateTags.Supervisor]
     Supervisor.start_link(children, opts)
   end
-	defp similarityVInfo(vmap,tagmap) do
-		Enum.map(Enum.with_index(Map.to_list(vmap)),fn({a,i})->
-			avid = elem(a,0)
-			atags = for k <- elem(a,1), do: k["tag"]
-			rpp = Enum.filter_map(Map.to_list(vmap),fn(x) -> elem(x,0) != avid end,fn(b)->
-				bvid = elem(b,0)
-				btags = for c <- elem(b,1), do: c["tag"]
-				s = HashSet.intersection(Enum.into(atags,HashSet.new),Enum.into(btags,HashSet.new)) |> HashSet.to_list 
-				r = Enum.reduce(s,0,fn(t,acc) -> Map.get(tagmap,t,0) + acc end)
-			{avid,bvid,r}
-			end)
-			pp = Enum.sort(rpp,fn(a,b)-> 
-				{_,_,aa} = a 
-				{_,_,bb} = b
-				aa > bb end)
-			cpp = Enum.slice(pp,0,10)
-      if rem(i,10) == 0  do
-				Enum.each(cpp,fn(kk)->
-					{a,b,c} = kk
-					IO.puts "i=#{i} a=#{a} b=#{b} c=#{c}"
-				end)
-			end
+	defp similarityVInfo(vmap,tagmap,timeout) do
+		c = Map.to_list(vmap) |>
+			Enum.with_index |>
+			Enum.chunk(10)
+		Enum.map(c,fn(k)-> 
+			k |>
+				Enum.map(&(Task.async(fn -> SimilaritySearch.search(&1,vmap,tagmap) end))) |>
+				Enum.map(&(Task.await(&1,timeout)))
 		end)
 	end
 	def main(args) do
 		{:ok,vpid} = VinfoTags.start_link
-		path = "../videoinfo3"
+		path = "../videoinfo2"
 		timeout=100000 #100sec
 		generateTags(path,vpid,timeout)
 		{:ok,tsk}=Task.start_link(fn -> loop() end)
 		send vpid,{:normalize,tsk}
-		send vpid,{:to_list,tsk}
-		send vpid,{:size,tsk}
+		#send vpid,{:to_list,tsk}
+		#send vpid,{:size,tsk}
 		loop()
 	end
 	def loop do
@@ -115,7 +127,8 @@ defmodule GenerateTags do
 				loop()
 			{:normalize,:ok,vmap,tagmap} ->
 				Logger.debug("normlaize end")
-				similarityVInfo(vmap,tagmap)
+				timeout = 100000
+				similarityVInfo(vmap,tagmap,timeout)
 				loop()
 		end
 	end
