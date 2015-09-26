@@ -14,7 +14,9 @@ defmodule VinfoTags do
         end
 			  loop(vmap,tagmap)
 			{:normalize}->
-				sz  = Map.size(vmap)
+				sz  = hd(Enum.sort(Map.to_list(tagmap),fn(a,b) -> elem(a,1) > elem(b,1) end))
+			  sz = elem(sz,1)
+			  IO.puts("sz=#{sz}")
 				map2 = for {k,v} <- tagmap, into: %{},do: {k,1-v*9/sz}
 				loop(vmap,map2)
 			{:to_list,caller} ->
@@ -42,20 +44,34 @@ defmodule ReadFileGenTags do
 	end
 end
 defmodule GenerateTags do
+	use Application
 	defp generateTags(path,vpid,timeout) do
 		File.ls!(path) |>
 			Enum.map(&(Task.async(fn -> ReadFileGenTags.readfiles(path<>"/"<>&1,vpid) end))) |>
 			Enum.map(&(Task.await(&1,timeout)))
 	end
-	def main do
+	def start(_type, _args) do
+    import Supervisor.Spec, warn: false
+		
+    children = [
+      # Define workers and child supervisors to be supervised
+      # worker(VercheckEx.Worker, [arg1, arg2, arg3])
+    ]
+    # See http://elixir-lang.org/docs/stable/elixir/Supervisor.html
+    # for other strategies and supported options
+    opts = [strategy: :one_for_one, name: VercheckEx.Supervisor]
+    Supervisor.start_link(children, opts)
+  end
+	def main(args) do
 		{:ok,vpid} = VinfoTags.start_link
-		path = "../videoinfo3"
+		path = "../videoinfo2"
 		timeout=100000 #100sec
 		generateTags(path,vpid,timeout)
 		{:ok,tsk}=Task.start_link(fn -> loop() end)
 		send vpid,{:normalize}
 		send vpid,{:to_list,tsk}
 		send vpid,{:size,tsk}
+		loop()
 	end
 	def loop do
 		receive do
@@ -67,7 +83,7 @@ defmodule GenerateTags do
 					end
 				end)
 				loop()
-			{:size,:ok,sz} ->  
+			{:size,:ok,sz} ->
 				IO.puts("size=#{sz}")
 				loop()
 		end

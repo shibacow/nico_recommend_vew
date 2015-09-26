@@ -7,6 +7,7 @@ defmodule RelationView.Mixfile do
      elixir: "~> 1.0",
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
+		 escript: escript,
      deps: deps]
   end
 
@@ -14,9 +15,12 @@ defmodule RelationView.Mixfile do
   #
   # Type `mix help compile.app` for more information
   def application do
-    [applications: [:logger]]
+    [applications: [:logger],
+		mod: {GenerateTags,[]}]
   end
-
+  def escript do
+    [main_module:  GenerateTags]
+  end
   # Dependencies can be Hex packages:
   #
   #   {:mydep, "~> 0.3.0"}
