@@ -30,28 +30,38 @@ defmodule VinfoTags do
 end
 
 defmodule ReadFileGenTags do
+	defp has_tag?(json,tag) do
+		tags = Enum.reduce(json["tags"],[],fn(a,acc)->
+			t = a["tag"]
+			acc ++ [t]
+		end)
+		Enum.any?(tags,fn(x)-> String.downcase(x) == tag end)
+	end
 	def readfiles(fname,vpid) do
-		Logger.info("fname=#{fname}")
+		Logger.info("start fname=#{fname}")
 		File.open(fname,[:read,:compressed],fn(file)-> 
 			Enum.each(IO.stream(file,:line),fn(line)->
 				json = Poison.Parser.parse!(line)
-				vid = json["video_id"]
-				tags = Enum.reduce(json["tags"],[],fn(a,acc)->
-					cpt = :crypto.hash(:md5,a["tag"])
-					acc++[cpt]
-				end)
-				send vpid,{:put,vid,tags}
-				Enum.each(tags,fn(a) ->
-					send vpid,{:tagput,a}
-				end)
+				if has_tag?(json,"vocaloid") do
+					vid = json["video_id"]
+					tags = Enum.reduce(json["tags"],[],fn(a,acc)->
+						cpt = :crypto.hash(:md5,a["tag"])
+						acc++[cpt]
+					end)
+					send vpid,{:put,vid,tags}
+					Enum.each(tags,fn(a) ->
+						send vpid,{:tagput,a}
+					end)
+				end
 			end)
 		end)
+		Logger.info("end fname=#{fname}")
 		fname
 	end
 end
 
 defmodule SimilaritySearch do
-	def search({a,i},vmap,tagmap) do
+	def search({a,i},vmap,tagmap,sz) do
 		avid = elem(a,0)
 		atags = for k <- elem(a,1), do: k
 		rpp = Enum.filter_map(Map.to_list(vmap),fn(x) -> elem(x,0) != avid end,fn(b)->
@@ -65,11 +75,21 @@ defmodule SimilaritySearch do
 			{_,_,aa} = a 
 			{_,_,bb} = b
 			aa > bb end)
-		cpp = Enum.slice(pp,0,10)
-    if rem(i,10) == 0  do
+		cpp = Enum.slice(pp,0,40)
+		File.open("vocaloid.txt",[:write,:append],fn(file)->
 			Enum.each(cpp,fn(kk)->
 				{a,b,c} = kk
-				Logger.info "i=#{i} a=#{a} b=#{b} c=#{c}"
+				if c>0 do
+					IO.puts(file,"#{a},#{b},#{c}")
+				end
+			end)
+		end)
+    if rem(i,100) == 0  do
+			Enum.each(cpp,fn(kk)->
+				{a,b,c} = kk
+				if c>2 do
+					Logger.info "sz=#{sz} i=#{i} a=#{a} b=#{b} c=#{c}"
+				end
 			end)
 		end
 		cpp
@@ -96,10 +116,11 @@ defmodule GenerateTags do
 	defp similarityVInfo(vmap,tagmap,timeout) do
 		c = Map.to_list(vmap) |>
 			Enum.with_index |>
-			Enum.chunk(10)
+			Enum.chunk(50)
+		sz = Map.size(vmap)
 		Enum.map(c,fn(k)-> 
 			k |>
-				Enum.map(&(Task.async(fn -> SimilaritySearch.search(&1,vmap,tagmap) end))) |>
+				Enum.map(&(Task.async(fn -> SimilaritySearch.search(&1,vmap,tagmap,sz) end))) |>
 				Enum.map(&(Task.await(&1,timeout)))
 		end)
 	end
