@@ -30,19 +30,23 @@ defmodule VinfoTags do
 end
 
 defmodule ReadFileGenTags do
-	defp has_tag?(json,tag) do
+	defp has_tag?(json,matchtags) do
 		tags = Enum.reduce(json["tags"],[],fn(a,acc)->
 			t = a["tag"]
 			acc ++ [t]
 		end)
-		Enum.any?(tags,fn(x)-> String.downcase(x) == tag end)
+		r = Enum.map(matchtags,fn(tag)->
+			Enum.any?(tags,fn(x)-> String.downcase(x) == tag end)
+		end)
+		Enum.any?(r)
 	end
+
 	def readfiles(fname,vpid) do
 		Logger.info("start fname=#{fname}")
 		File.open(fname,[:read,:compressed],fn(file)-> 
 			Enum.each(IO.stream(file,:line),fn(line)->
 				json = Poison.Parser.parse!(line)
-				if has_tag?(json,"vocaloid") do
+				if has_tag?(json,["mikumikudance","mmd"]) do
 					vid = json["video_id"]
 					tags = Enum.reduce(json["tags"],[],fn(a,acc)->
 						cpt = :crypto.hash(:md5,a["tag"])
@@ -76,7 +80,7 @@ defmodule SimilaritySearch do
 			{_,_,bb} = b
 			aa > bb end)
 		cpp = Enum.slice(pp,0,40)
-		File.open("vocaloid.txt",[:write,:append],fn(file)->
+		File.open("mmd.txt",[:write,:append],fn(file)->
 			Enum.each(cpp,fn(kk)->
 				{a,b,c} = kk
 				if c>0 do
